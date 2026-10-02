@@ -5,7 +5,7 @@ import logging
 import re
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -292,6 +292,7 @@ async def create_automation(
 async def list_automations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    created_by: Literal["me", "others"] | None = Query(default=None),
     user: AuthenticatedUser = Depends(_require_view_automations),
     session: AsyncSession = Depends(get_session),
 ) -> AutomationListResponse:
@@ -300,14 +301,22 @@ async def list_automations(
         Automation.org_id == user.org_id,
         Automation.deleted_at.is_(None),
     )
+    if created_by == "me":
+        base_query = base_query.where(Automation.user_id == user.user_id)
+    elif created_by == "others":
+        base_query = base_query.where(Automation.user_id != user.user_id)
 
     count_result = await session.execute(
         select(func.count()).select_from(base_query.subquery())
     )
     total = count_result.scalar() or 0
 
+    # id breaks created_at ties (e.g. one Git Sync import), so offset pages
+    # keep one order across requests.
     result = await session.execute(
-        base_query.order_by(Automation.created_at.desc()).offset(offset).limit(limit)
+        base_query.order_by(Automation.created_at.desc(), Automation.id.desc())
+        .offset(offset)
+        .limit(limit)
     )
     automations = result.scalars().all()
 
