@@ -210,10 +210,9 @@ def _conversation_supports_user_id() -> bool:
 
 
 def _resolve_agent(
-    workspace, llm, cli_mode: bool = True, finish_tool_response_schema=None
+    agent_settings, llm=None, cli_mode: bool = True, finish_tool_response_schema=None
 ):
-    """Get the correct agent for the server's configured agent_kind."""
-    agent_settings = workspace._fetch_agent_settings()
+    """Build the agent matching the server's configured agent_kind."""
     if isinstance(agent_settings, ACPAgentSettings):
         return agent_settings.create_agent()
     # Get default agent with tools and condenser (CLI mode to disable browser)
@@ -354,6 +353,15 @@ with workspace_ctx as workspace:
             # Collect cloned repo directories for skill loading
             repo_dirs = [m.local_path for m in clone_result.repo_mappings.values()]
 
+    # Fetch agent settings up front: the configured agent_kind determines
+    # whether this run needs an LLM at all. ACP agents have none, and newer
+    # SDKs raise ValueError from get_llm() for ACP settings when no LLM
+    # profile is active, so get_llm() must not be called on that path.
+    print("\n=== AGENT SETTINGS ===")
+    agent_settings = workspace._fetch_agent_settings()
+    is_acp_agent = isinstance(agent_settings, ACPAgentSettings)
+    print(f"  agent_kind: {agent_settings.agent_kind}")
+
     # Load ALL skills via workspace.load_skills_from_agent_server()
     # If repos were cloned, project skills are loaded from EACH cloned repo
     print("\n=== LOAD SKILLS ===")
@@ -362,6 +370,15 @@ with workspace_ctx as workspace:
         project_dirs=repo_dirs if repo_dirs else None
     )
     print(f"  loaded {len(loaded_skills)} skills")
+    if is_acp_agent and agent_settings.agent_context is not None:
+        # ACP settings can carry provider credentials in agent_context.secrets;
+        # graft the loaded skills onto that context instead of replacing it.
+        agent_context = agent_settings.agent_context.model_copy(
+            update={
+                "skills": agent_context.skills,
+                "load_public_skills": agent_context.load_public_skills,
+            }
+        )
 
     # Get repos context (mapping of URLs to local paths)
     repos_context = ""
@@ -416,21 +433,27 @@ More activity arrived on the same subject while this run was queued:
 
 {USER_PROMPT}"""
 
-    # Get LLM config via workspace/profile APIs
+    # Get LLM config via workspace/profile APIs. Skipped for ACP agents: they
+    # have no LLM (the subprocess manages its own model) and newer SDKs raise
+    # ValueError from get_llm() for ACP settings when no profile is active.
     print("\n=== GET_LLM ===")
-    try:
-        llm = workspace.get_llm(profile_name=model_profile)
-    except FileNotFoundError:
-        if not model_profile:
-            raise
-        print(
-            f"  profile {model_profile!r} not found; "
-            "falling back to active/default profile"
-        )
-        llm = workspace.get_llm()
-    print(f"  profile: {model_profile or 'DEFAULT'}")
-    print(f"  model: {llm.model}")
-    print(f"  api_key present: {bool(llm.api_key)}")
+    if is_acp_agent:
+        print("  skipped: ACP agent has no LLM")
+        llm = None
+    else:
+        try:
+            llm = workspace.get_llm(profile_name=model_profile)
+        except FileNotFoundError:
+            if not model_profile:
+                raise
+            print(
+                f"  profile {model_profile!r} not found; "
+                "falling back to active/default profile"
+            )
+            llm = workspace.get_llm()
+        print(f"  profile: {model_profile or 'DEFAULT'}")
+        print(f"  model: {llm.model}")
+        print(f"  api_key present: {bool(llm.api_key)}")
 
     # Get secrets via workspace
     print("\n=== GET_SECRETS ===")
@@ -459,7 +482,7 @@ More activity arrived on the same subject while this run was queued:
     report_phase("Configuring agent")
     # Keep finish-tool schema wiring in sync with presets/plugin/sdk_main.py.
     agent = _resolve_agent(
-        workspace,
+        agent_settings,
         llm=llm,
         cli_mode=True,
         finish_tool_response_schema=TaskOutcome,
