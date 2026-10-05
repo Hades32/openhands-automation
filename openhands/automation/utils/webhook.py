@@ -19,6 +19,7 @@ from openhands.automation.models import (
     Automation,
     AutomationRun,
     AutomationRunStatus,
+    AutomationState,
     CustomWebhook,
 )
 from openhands.automation.providers import (
@@ -80,6 +81,7 @@ async def get_webhook_config(
                 is_builtin=True,
                 signature_header=provider.signature_header,
                 signature_scheme=provider.verifier,
+                event_id_header=provider.event_id_header,
             )
         return None
 
@@ -100,6 +102,8 @@ async def get_webhook_config(
             signature_header=webhook.signature_header,
             # A cleared column reads as the default.
             signature_scheme=webhook.signature_scheme or DEFAULT_VERIFIER,
+            # NULL means this source does not identify deliveries.
+            event_id_header=webhook.event_id_header,
         )
     return None
 
@@ -134,6 +138,7 @@ async def get_event_automations(
     base_filters = [
         Automation.org_id == org_id,
         Automation.enabled == True,  # noqa: E712
+        Automation.state == AutomationState.ACTIVE,
         Automation.deleted_at.is_(None),
     ]
 
@@ -153,8 +158,10 @@ async def get_event_automations(
             Automation.trigger.op("->>")("source") == literal(source),
         )
 
+    # Ordered so an event matching several automations locks their runs in the
+    # same order in every worker; otherwise two events on one subject deadlock.
     result = await session.execute(
-        select(Automation).where(*base_filters, trigger_filter)
+        select(Automation).where(*base_filters, trigger_filter).order_by(Automation.id)
     )
     automations = result.scalars().all()
 
@@ -195,6 +202,7 @@ async def get_requested_event_types(
 
     base_filters = [
         Automation.enabled == True,  # noqa: E712
+        Automation.state == AutomationState.ACTIVE,
         Automation.deleted_at.is_(None),
     ]
 
@@ -240,6 +248,7 @@ async def create_automation_run(
     automation: Automation,
     session: AsyncSession,
     event_payload: dict[str, Any] | None = None,
+    subject_key: str | None = None,
 ) -> AutomationRun:
     """
     Create a PENDING automation run for an event-triggered automation.
@@ -250,6 +259,8 @@ async def create_automation_run(
         event_payload: The webhook payload that triggered this run (optional)
                        For GitHub events: model_dump() of parsed Pydantic event
                        For custom webhooks: the raw payload dict
+        subject_key: The external subject this run is about, for
+                     `continue_conversation` triggers.
 
     Returns:
         The created AutomationRun instance
@@ -258,8 +269,10 @@ async def create_automation_run(
         id=uuid.uuid4(),
         automation_id=automation.id,
         status=AutomationRunStatus.PENDING,
+        trigger_source="event",
         event_payload=event_payload,
         telemetry_distinct_id=automation.telemetry_distinct_id,
+        subject_key=subject_key,
     )
     session.add(run)
     return run

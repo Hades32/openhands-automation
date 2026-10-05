@@ -53,7 +53,6 @@ from openhands.automation.ingest import AcceptedEvent, accept_event
 from openhands.automation.providers import (
     WebhookVerifier,
     get_header,
-    get_provider,
     get_verifier,
 )
 from openhands.automation.schemas import (
@@ -62,7 +61,6 @@ from openhands.automation.schemas import (
     RequestedEventTypesResponse,
     WebhookConfig,
 )
-from openhands.automation.telemetry import capture_automation_event
 from openhands.automation.utils.webhook import (
     get_requested_event_types,
     get_webhook_config,
@@ -256,15 +254,6 @@ async def receive_event(
             org_id,
             e,
         )
-        await capture_automation_event(
-            "automation_event_ignored",
-            request=request,
-            properties={
-                "event_source": source,
-                "org_id": str(org_id),
-                "ignore_reason": "unrecognized_event",
-            },
-        )
         return EventResponse(received=True, matched=0, runs_created=[])
     except Exception as e:
         logger.warning("Failed to parse event: %s", e)
@@ -276,27 +265,18 @@ async def receive_event(
         event.event_key,
         org_id,
     )
-    await capture_automation_event(
-        "automation_event_received",
-        request=request,
-        properties={
-            "event_source": source,
-            "event_key": event.event_key,
-            "org_id": str(org_id),
-            "webhook_builtin": config.is_builtin,
-        },
-    )
 
     # 6. Record, match triggers and create runs (transport-neutral)
     #
     # The delivery id is where HTTP has to do the looking: `accept_event()`
     # deduplicates on whatever the transport hands it, and for a webhook that
-    # is a header. A provider that names no header, and every custom webhook,
+    # is a header. The header name comes from the resolved config, so a
+    # built-in provider uses its descriptor and a custom webhook uses whatever
+    # it configured; neither is hard-coded here. A source that names no header
     # yields None -- recorded, routed, not deduplicated.
-    provider = get_provider(source)
     provider_event_id = (
-        get_header(request.headers, provider.event_id_header)
-        if provider is not None and provider.event_id_header
+        get_header(request.headers, config.event_id_header)
+        if config.event_id_header
         else None
     )
     result = await accept_event(
@@ -316,4 +296,5 @@ async def receive_event(
         received=True,
         matched=result.matched,
         runs_created=result.run_ids,
+        conversations_continued=result.conversation_ids,
     )
