@@ -14,6 +14,9 @@ Related repositories have different responsibilities:
 
 If a PR is opened in the wrong repository, explicitly recommend closing and moving it to the repository that owns the change rather than merging it here. PRs must follow the repository's contribution and applicable code-review guidance.
 
+For issue triage, read [the review guide](.agents/skills/custom-codereview-guide.md#issue-triage-ownership-and-scope)
+for ownership and scope; PR evidence is not an issue-readiness requirement.
+
 ## Review-Facing Implementation Checklist
 
 Before opening a PR that changes scheduling, dispatch, run state, or sandbox
@@ -429,7 +432,11 @@ exactly one org, the deterministic local org from `auth.py`'s
   `AUTOMATION_GIT_SYNC_ENCRYPTION_KEY`) to encrypt file contents (via the
   SDK's Fernet-based `Cipher`, same primitive as the KV store) before they're
   committed. Reading a repo written before encryption was turned on still
-  works — plaintext files pass through unchanged.
+  works — plaintext files pass through unchanged. Setting, changing or
+  clearing the key via `PUT /v1/git-sync/config` marks every synced
+  automation dirty (`apply_git_sync_config_override`), and the export treats
+  a plaintext file as stale while a key is set, so the next cycle rewrites
+  them all in one commit instead of leaving HEAD readable.
 - **Runtime config**: `PUT /v1/git-sync/config` configures, reconfigures or
   pauses/resumes the org's sync (repo/branch/path/token/encryption key/author)
   without a restart, via `git_sync/config_override.py` (overrides stored as

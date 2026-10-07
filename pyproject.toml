@@ -1,6 +1,6 @@
 [project]
 name = "openhands-automation"
-version = "1.18.0"
+version = "1.19.0"
 description = "OpenHands automation service"
 readme = "README.md"
 license = "MIT"
@@ -79,7 +79,7 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-extend-exclude = ["openhands/automation/presets"]
+extend-exclude = ["openhands/automation/presets", ".pr"]
 
 [tool.ruff.format]
 quote-style = "double"
