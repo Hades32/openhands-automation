@@ -81,6 +81,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from pydantic import BaseModel
+
 # Detect execution mode based on AGENT_SERVER_URL presence
 agent_server_url = os.environ.get("AGENT_SERVER_URL", "").rstrip("/")
 IS_LOCAL_MODE = bool(agent_server_url)
@@ -193,7 +195,10 @@ def _phase_poster() -> None:
 
 # SDK imports (before workspace context so import errors are caught)
 from openhands.sdk import Conversation, RemoteConversation
+from openhands.sdk.agent import AgentBase
 from openhands.sdk.automation import automation_conversation_kwargs
+from openhands.sdk.context import AgentContext
+from openhands.sdk.llm import LLM
 from finish_tool_hook import finish_tool_required_hook_config
 from openhands.tools.preset import TaskOutcome
 
@@ -201,7 +206,7 @@ try:
     from openhands.sdk.mcp.config import coerce_mcp_config as _coerce_mcp_config
 except ImportError:
     _coerce_mcp_config = None
-from openhands.sdk.settings import ACPAgentSettings
+from openhands.sdk.settings import ACPAgentSettings, AgentSettingsConfig
 from openhands.sdk.workspace.remote.base import RemoteWorkspace
 from openhands.tools.preset.default import get_default_agent
 from openhands.workspace import OpenHandsCloudWorkspace
@@ -224,7 +229,7 @@ def _is_retryable_error(error: BaseException) -> bool:
     return isinstance(error, (httpx.ConnectError, httpx.TimeoutException))
 
 
-def _fetch_agent_settings(workspace):
+def _fetch_agent_settings(workspace: RemoteWorkspace) -> AgentSettingsConfig | None:
     """Read the server's agent settings, or return None when they are unavailable.
 
     workspace._fetch_agent_settings() makes a single request, so this applies
@@ -251,7 +256,9 @@ def _fetch_agent_settings(workspace):
         return None
 
 
-def _merge_agent_context(agent_settings, skills_context):
+def _merge_agent_context(
+    agent_settings: AgentSettingsConfig | None, skills_context: AgentContext
+) -> AgentContext:
     """Return the agent context for the run, with the loaded skills applied.
 
     ACP settings can carry provider credentials in agent_context.secrets, so
@@ -270,8 +277,11 @@ def _merge_agent_context(agent_settings, skills_context):
 
 
 def _resolve_agent(
-    agent_settings, llm=None, cli_mode: bool = True, finish_tool_response_schema=None
-):
+    agent_settings: AgentSettingsConfig | None,
+    llm: LLM | None = None,
+    cli_mode: bool = True,
+    finish_tool_response_schema: type[BaseModel] | None = None,
+) -> AgentBase:
     """Build the agent matching the server's configured agent_kind."""
     if isinstance(agent_settings, ACPAgentSettings):
         return agent_settings.create_agent()

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 import tenacity
+from pydantic import BaseModel
 
 from openhands.automation.models import Automation, TarballUpload, UploadStatus
 from openhands.automation.preset_router import (
@@ -27,11 +28,16 @@ from openhands.automation.preset_router import (
     _replace_prompt_in_tarball,
     _resolve_experiment_variant_models,
 )
-from openhands.sdk.agent import ACPAgent
+from openhands.sdk.agent import ACPAgent, AgentBase
 from openhands.sdk.context import AgentContext
+from openhands.sdk.llm import LLM
 from openhands.sdk.mcp.config import coerce_mcp_config, dump_mcp_config
 from openhands.sdk.plugin import PluginSource
-from openhands.sdk.settings import ACPAgentSettings, OpenHandsAgentSettings
+from openhands.sdk.settings import (
+    ACPAgentSettings,
+    AgentSettingsConfig,
+    OpenHandsAgentSettings,
+)
 from openhands.sdk.skills import Skill
 from openhands.sdk.workspace import RemoteWorkspace
 from openhands.workspace import RepoSource
@@ -131,6 +137,12 @@ def _load_preset_agent_helpers(
     assert {node.name for node in function_nodes} == set(_AGENT_HELPER_NAMES)
     namespace: dict[str, Any] = {
         "ACPAgentSettings": ACPAgentSettings,
+        "AgentBase": AgentBase,
+        "AgentContext": AgentContext,
+        "AgentSettingsConfig": AgentSettingsConfig,
+        "BaseModel": BaseModel,
+        "LLM": LLM,
+        "RemoteWorkspace": RemoteWorkspace,
         "get_default_agent": get_default_agent,
         "httpx": httpx,
         "tenacity": tenacity,
